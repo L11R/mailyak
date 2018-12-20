@@ -88,13 +88,17 @@ func (m *MailYak) Send() error {
 		}
 	}
 	
-	if err = c.Mail(m.fromAddr); err != nil {
-		return err
+	if !strings.ContainsAny(addr, "\n\r") {
+		if err = c.Mail(m.fromAddr); err != nil {
+			return err
+		}
+	} else {
+		return errors.New("smtp: A line must not contain CR or LF")
 	}
 	
 	for _, addr := range append(append(m.toAddrs, m.ccAddrs...), m.bccAddrs...) {
-		if err = c.Verify(addr); err != nil {
-			return err
+		if strings.ContainsAny(addr, "\n\r") {
+			return errors.New("smtp: A line must not contain CR or LF")
 		}
 		
 		if err = c.Rcpt(addr); err != nil {
