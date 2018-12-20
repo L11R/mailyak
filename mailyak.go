@@ -17,20 +17,21 @@ type MailYak struct {
 	html  BodyPart
 	plain BodyPart
 
-	toAddrs        []string
-	ccAddrs        []string
-	bccAddrs       []string
-	subject        string
-	fromAddr       string
-	fromName       string
-	replyTo        string
-	headers        map[string]string // arbitrary headers
-	attachments    []attachment
-	auth           smtp.Auth
-	trimRegex      *regexp.Regexp
-	host           string
-	writeBccHeader bool
-	date           string
+	toAddrs            []string
+	ccAddrs            []string
+	bccAddrs           []string
+	subject            string
+	fromAddr           string
+	fromName           string
+	replyTo            string
+	headers            map[string]string // arbitrary headers
+	attachments        []attachment
+	auth               smtp.Auth
+	insecureSkipVerify bool
+	trimRegex          *regexp.Regexp
+	host               string
+	writeBccHeader     bool
+	date               string
 }
 
 // New returns an instance of MailYak using host as the SMTP server, and
@@ -45,14 +46,15 @@ type MailYak struct {
 // 			"stmp.itsallbroken.com",
 //		))
 //
-func New(host string, auth smtp.Auth) *MailYak {
+func New(host string, auth smtp.Auth, insecureSkipVerify bool) *MailYak {
 	return &MailYak{
-		headers:        map[string]string{},
-		host:           host,
-		auth:           auth,
-		trimRegex:      regexp.MustCompile("\r?\n"),
-		writeBccHeader: false,
-		date:           time.Now().Format(time.RFC1123Z),
+		headers:            map[string]string{},
+		host:               host,
+		auth:               auth,
+		insecureSkipVerify: insecureSkipVerify,
+		trimRegex:          regexp.MustCompile("\r?\n"),
+		writeBccHeader:     false,
+		date:               time.Now().Format(time.RFC1123Z),
 	}
 }
 
@@ -66,13 +68,53 @@ func (m *MailYak) Send() error {
 		return err
 	}
 
-	return smtp.SendMail(
-		m.host,
-		m.auth,
-		m.fromAddr,
-		append(append(m.toAddrs, m.ccAddrs...), m.bccAddrs...),
-		buf.Bytes(),
-	)
+	c, err := smtp.Dial(m.host)
+	if err != nil {
+		return err
+	}
+	
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err = c.StartTLS(&tls.Config{
+			InsecureSkipVerify: m.insecureSkipVerify,
+		}); err != nil {
+			return err
+		}
+	}
+	
+	if m.auth != nil {
+		if err = c.Auth(m.auth); err != nil {
+			return err
+		}
+	}
+	
+	if err = c.Mail(m.fromAddr); err != nil {
+		return err
+	}
+	
+	for _, addr := range append(append(m.toAddrs, m.ccAddrs...), m.bccAddrs...) {
+		if err = c.Verify(addr); err != nil {
+			return err
+		}
+		
+		if err = c.Rcpt(addr); err != nil {
+			return err
+		}
+	}
+	
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(buf.Bytes())
+	if err != nil {
+		return err
+	}
+	err = w.Close()
+	if err != nil {
+		return err
+	}
+	
+	return c.Quit()
 }
 
 // MimeBuf returns the buffer containing all the RAW MIME data.
