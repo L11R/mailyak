@@ -3,6 +3,7 @@ package mailyak
 import (
 	"bytes"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/smtp"
 	"regexp"
@@ -88,7 +89,7 @@ func (m *MailYak) Send() error {
 		}
 	}
 	
-	if !strings.ContainsAny(addr, "\n\r") {
+	if !strings.ContainsAny(m.fromAddr, "\n\r") {
 		if err = c.Mail(m.fromAddr); err != nil {
 			return err
 		}
